@@ -1,9 +1,9 @@
 # Spring Boot Reference
 
-![img.png](./assets/img.JPG)
+![img.png](./assets/1.png)
 
-![img.png](./assets/img1.JPG)
+![img.png](./assets/2.png)
 
-![img.png](./assets/img2.JPG)
+![img.png](./assets/3.png)
 
-![img.png](./assets/img3.JPG)
+![img.png](./assets/4.png)
