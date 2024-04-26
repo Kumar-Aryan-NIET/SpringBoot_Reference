@@ -477,4 +477,261 @@ public class ArticleController {
 This gives us no way to mock or stub out the ArticleRepository in our unit test. 
 Let’s compound the problem by adding on to our application.
 
+Slug service
+---
+You will often find that articles or blog posts contain a slug. A slug is the unique identifying part of the web address, typically at the end of the URL. 
+While an ID is typically used to identify the article in the database, it isn’t very helpful to send a URL that looks like this to someone:
+
+http://localhost:8080/api/posts/1
+
+_Instead you would assign a slug, which is a hyphenated representation of the title, and use that in the URL._
+
+http://localhost:8080/api/posts/hello-world
+
+Start by modifying the article record to contain a String-type slug.
+
+```java
+public record Article(
+  Integer id,
+  String title,
+  String slug,
+  String content,
+  LocalDateTime publishedOn
+) { ... }
+```
+Next, you need to create a class that can take in the title of the article and will return a slug. 
+There is a lot that goes into creating a slug, but for now, we are going to create a simple slug service. 
+
+To ensure that we aren’t tied to this simple slug service in the future, you will create an interface that defines a contract for a single method and name it slugify. 
+In a package, the name service creates a new interface named Slugify.
+
+```java
+public interface SlugService {
+    String slugify(String input);
+}
+```
+
+With the contract in place, you can create a class named SimpleSlugService that implements the Slugify interface. 
+This is a simplified version of what a slugify method is capable of, but it will be sufficient for what you’re trying to do in this application.
+
+```java
+public class SimpleSlugService implements SlugService {
+
+    @Override
+    public String slugify(String title) {
+        return title
+                .toLowerCase() // Convert to lowercase
+                .replaceAll("[^a-zA-Z0-9 ]", "") // replace all special characters expect space
+                .replaceAll(" ", "-"); // replace all spaces with hyphens
+    }
+// ...
+}
+```
+Now that you have a simple slug service, you will need an instance of it in your ArticleRepository class. Similar to the controller, you can create a new instance of this class in the constructor. In this case, you will use the interface as the type, in case you want to replace this with a more sophisticated version of the slugify service later.
+
+```java
+public class ArticleRepository {
+
+    private final SlugService slugService;
+
+    public ArticleRepository() {
+        this.slugService = new SimpleSlugService();
+    }
+// ...
+}
+```
+Now that you have an instance of the SimpleSlugService you can use it to create slugs for each of your articles. I have refactored the code a bit to create our three sample articles, so that you don’t have to repeat the title and slug arguments. 
+
+Take note that you are using the slug service to slugify the title. If you want to take a look at the Github repository, there are a couple of tests for this service in SimpleSlugServiceTest.
+
+```java
+public class ArticleRepository {
+
+    private final SlugService slugService;
+    private List<Article> articles = new ArrayList<>();
+
+    public ArticleRepository() {
+        this.slugService = new SimpleSlugService();
+        Map<Integer, String> articles = Map.of(
+                1,
+                "Hello, World!",
+                2,
+                "Spring Initializr",
+                3,
+                "Spring Dependency Injection"
+        );
+        for (Map.Entry<Integer, String> entry : articles.entrySet()) {
+            this.articles.add(
+                    new Article(
+                            entry.getKey(),
+                            entry.getValue(),
+                            slugService.slugify(entry.getValue()),
+                            "TEST CONTENT",
+                            LocalDateTime.now()
+                    )
+            );
+        }
+    }
+// ...
+
+}
+```
+As you can imagine, you are going to have the same problem testing the ArticleRepository that you did when testing the ArticleController. 
+
+To make matters worse,, you are creating a new instance of the ArticleRepository in your controller test, which in turn creates a new instance of the SimpleSlugService. 
+
+Therefore, instead of doing a simple unit test of the controller, you are doing a full integration test across multiple components of the application.
+```java
+//_Dependency injection to the rescue_
+
+// Now that we have identified the problem, we need to look at how we can solve it. 
+// A starting point would be to accept the ArticleRepository as an argument to the controller's constructor.
+
+@RestController
+@RequestMapping("/api/articles")
+public class ArticleController {
+
+private final ArticleRepository articles;
+
+public ArticleController(ArticleRepository articles) {
+this.articles = articles;
+}
+// ...
+
+}
+```
+With that in place, you can create a mock of the ArticleRepository and pass that in as an argument to the controller’s constructor. You now have a test that is only focused on testing the controller, and will mock out any other dependencies.
+
+```java
+@WebMvcTest(ArticleController.class)
+class ArticleControllerTest {
+
+    ArticleController controller;
+
+    @MockBean
+    ArticleRepository repository;
+
+    List<Article> articles = new ArrayList();
+
+    @BeforeEach
+    void setUp() {
+        controller = new ArticleController(repository);
+        articles = List.of(
+                new Article(
+                        1,
+                        "Hello, World!",
+                        "hello-world",
+                        "Welcome to my Blog!",
+                        LocalDateTime.now()
+                )
+        );
+    }
+
+    @Test
+    void shouldReturnAllArticles() {
+        when(repository.findAll()).thenReturn(articles);
+        assertEquals(1, controller.findAll().spliterator().getExactSizeIfKnown());
+    }
+
+    @Test
+    void shouldReturnArticleByIdWithValidId() {
+        when(repository.findById(1)).thenReturn(articles.get(0));
+        Article article = controller.findById(1);
+        assertNotNull(article);
+    }
+}
+```
+
+This will work for our tests, but if you try and run your application, you will see an error in the console
+
+```java
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Parameter 0 of constructor in  dev.danvega.demo.controller.ArticleController  required a bean of type 'dev.danvega.demo.repository.ArticleRepository' that could not be found.
+While this error might seem like a foreign language, it will make more sense when you realize what the Spring Framework is trying to do for you. When you have a single constructor in your class and the signature of that constructor accepts arguments, Spring will try to automatically wire those up for you.
+
+Spring is looking in the pool (ApplicationContext) of classes (beans) that it manages for you and tries to find one of the ArticleRepository. When Spring realizes that it doesn’t have a bean of that type, it can’t satisfy the contract of that constructor, and therefore decides there is no reason to move forward. This is known as constructor injection because you are trying to inject an instance of that class by using the constructor, and it’s the preferred method of dependency injection in Spring.
+
+To resolve this issue, you need to tell Spring about the ArticleRepository class that you have created. To do this, you can add the @Component annotation, or one of the specialized versions of this annotation (e.g., @Repository) to the class.
+```        
+```java
+@Repository
+public class ArticleRepository {
+// ...
+}
+```
+When you run the application, everything should start up without error. Additionally, if you visit http://localhost:8080/api/articles, you should see the three articles in the application. Now that you know how to fix this, let’s do the same for our SimpleSlugService. There is another specialized version of the @Component annotation @Service.
+
+```java
+@Service
+public class SimpleSlugService implements SlugService {}
+```
+
+Back in the ArticleRepository, you can adjust the constructor to take in the SlugService as an argument, and because Spring knows about your SimpleSlugService, which is a type of SlugService, that will satisfy the constructor contract.
+
+```java
+@Repository
+public class ArticleRepository {
+
+private final SlugService slugService;
+private List<Article> articles = new ArrayList<>();
+
+public ArticleRepository(SlugService slugService) {
+this.slugService = slugService;
+// ...
+}
+```
+
+```java
+// The next question might be: 
+// What happens if we have two different types of slug services? 
+// So let’s say you found a more advanced way to create slugs and created a new AdvancedSlugService.
+```
+
+```java
+@Service
+public class AdvancedSlugService implements SlugService {
+
+    @Override
+    public String slugify(String input) {
+        return "advanced-slug";
+    }
+}
+```
+
+At this point you will see an error in the ArticleRepository.
+
+```java
+Could not autowire. There is more than one bean of 'SlugService' type.
+```
+
+When you have more than one type that can satisfy a contract, you need to be specific about which one you would like autowired. 
+```java
+// You can tell Spring exactly which bean you expect to be injected into the constructor by using the @Qualifier annotation. 
+
+// There is also a @Primary annotation that you can use to indicate that a bean should be given preference when multiple candidates are qualified to autowire a dependency.
+
+@Repository
+public class ArticleRepository {
+
+    private final SlugService slugService;
+    private List<Article> articles = new ArrayList<>();
+
+    public ArticleRepository(@Qualifier("advancedSlugService") SlugService slugService) {
+        this.slugService = slugService;
+    }
+}
+```
+When you run the application, everything should work as expected. You can take this opportunity to adjust any of your tests.
+
+Following this pattern throughout your application will give you a solid foundation on which the rest of your application can be built.
+
+#### Conclusion
+
+Congratulations on making it through the entire guide and learning the basics of dependency injection in Spring. You have now learned a core feature that is fundamental to understanding Spring.
+
 
