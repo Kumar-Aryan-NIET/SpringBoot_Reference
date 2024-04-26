@@ -245,7 +245,8 @@ The application you will build today is modeled around the idea of a blog. A blo
 // fill in the metadata about the project, and 
 // select the Spring Web dependency.
 ```
-![img.png](img.png)
+![img](https://github.com/Kumar-Aryan-NIET/SpringBoot_Reference/assets/101974240/1f484983-58bb-40d5-9888-1d89d4b31db7)
+
 ```java
 // When you’re done, click on the generate button at the bottom of the screen, 
 // which will download a zipped file with the starting code for your project. 
